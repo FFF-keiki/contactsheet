@@ -3,50 +3,47 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#f5f4f0" />
-  <meta name="description" content="画像とメモを並べてコンタクトシートを作り、元画像を変換せずPNGで書き出せるブラウザ完結ツール。" />
+  <meta name="theme-color" content="#f6f7f9" />
+  <meta name="description" content="元画像を圧縮せず、大きく比較できるコンタクトシートをブラウザで作成してPNGで保存します。" />
   <title>FRAME / MAKER — コンタクトシート作成</title>
   <link rel="stylesheet" href="./styles.css" />
-  <!-- html-to-image: the export library; no image data is uploaded to a server -->
   <script defer src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/dist/html-to-image.js"></script>
   <script defer src="./app.js"></script>
 </head>
 <body>
   <div class="app">
     <header class="topbar">
-      <div class="brand"><span class="brand-symbol" aria-hidden="true">▧</span><span><strong>FRAME<span class="slash">/</span>MAKER</strong><small>CONTACT SHEET STUDIO</small></span></div>
-      <div class="topbar-right">
-        <span class="local-pill"><span class="local-dot"></span> ブラウザ内で処理</span>
-        <button id="exportPngBtn" class="button primary" type="button"><span class="ico">⤓</span> シートをPNG保存</button>
-      </div>
+      <div class="brand"><span class="brand-symbol" aria-hidden="true">▧</span><strong>FRAME <span class="slash">/</span> MAKER</strong></div>
+      <div class="topbar-right"><span class="local-pill">画像はブラウザ内のみで処理</span><button id="exportPngBtn" class="button primary" type="button">シートをPNG保存 ↓</button></div>
     </header>
     <div class="workspace">
       <aside class="editor-panel">
-        <div class="panel-head"><div><span class="section-kicker">EDITOR</span><h1>シート編集</h1></div><button id="resetBtn" class="text-action" title="新規作成（入力内容は消えます）" type="button">新規作成</button></div>
-        <section class="side-section" aria-labelledby="sheetTitle">
-          <h2 id="sheetTitle" class="side-heading"><span class="heading-num">01</span> シート設定</h2>
-          <label class="field">タイトル<input id="sheetName" maxlength="100" placeholder="生成比較テスト" /></label>
-          <label class="field">補足テキスト<input id="sheetSubtitle" maxlength="160" placeholder="作成日・試行条件など（任意）" /></label>
-          <div class="field-cols">
-            <label class="field">並び方<select id="sheetColumns"><option value="2">2列</option><option value="1">1列</option></select></label>
-            <label class="field">画像の表示<input value="全体表示・切り抜きなし" disabled aria-label="画像の表示方法" /></label>
-          </div>
+        <div class="panel-head"><div><span class="section-kicker">EDITOR</span><h1>シート編集</h1></div><button id="resetBtn" class="text-action" title="すべての入力内容を消去" type="button">新規作成</button></div>
+        <section class="side-section">
+          <label class="field">出力レイアウト
+            <select id="sheetColumns"><option value="1">1列（画像を大きく）</option><option value="2">2列（コンパクト）</option></select>
+          </label>
+          <p class="hint">印刷画像にはタイトルやフッターを表示しません。元画像は縮小・圧縮せず読み込みます。</p>
         </section>
         <section class="side-section cards-section" aria-labelledby="boxTitle">
-          <div class="side-heading-row"><h2 id="boxTitle" class="side-heading"><span class="heading-num">02</span> ボックス <span id="boxCount" class="count">1</span></h2><button id="addBoxBtn" class="mini-add" type="button">＋ 追加</button></div>
+          <div class="side-heading-row"><h2 id="boxTitle" class="side-heading">ボックス <span id="boxCount" class="count">1</span></h2><button id="addBoxBtn" class="mini-add" type="button">＋ 追加</button></div>
           <div id="boxList" class="box-list" role="list" aria-label="ボックス一覧・並び順"></div>
           <p class="hint compact">↑↓で順番を変更できます。</p>
         </section>
         <section class="side-section detail-section" aria-labelledby="detailTitle">
-          <div class="side-heading-row"><h2 id="detailTitle" class="side-heading"><span class="heading-num">03</span> 選択中のボックス</h2><button id="downloadBoxBtn" type="button" class="text-action">個別PNG ↓</button></div>
+          <div class="side-heading-row"><h2 id="detailTitle" class="side-heading">選択中のボックス</h2><button id="downloadBoxBtn" type="button" class="text-action">個別PNG ↓</button></div>
           <div id="boxEditor"></div>
         </section>
-        <div class="panel-bottom"><button id="loadDemoBtn" class="demo-link" type="button">サンプルを読み込む ↗</button><p>元画像は圧縮・縮小しません。データは保存されないため、ページを閉じると編集内容は消えます。</p></div>
+        <div class="panel-bottom"><button id="loadDemoBtn" class="demo-link" type="button">サンプルを読み込む ↗</button><p>画像はサーバーに送信されません。JSON保存もありません。ページを閉じると入力内容は消えます。</p></div>
       </aside>
       <main class="main-area">
-        <div class="preview-top"><div><span class="section-kicker">LIVE PREVIEW</span><h2>コンタクトシート <span class="preview-description">編集内容をそのまま画像に書き出します</span></h2></div><div class="preview-meta"><span id="status" role="status">準備完了</span><span class="size-label">PNG・元画像解像度優先</span></div></div>
-        <div class="preview-scroll" id="previewScroll"><div class="sheet" id="sheetPreview"><div class="sheet-heading"><div><span class="sheet-eyebrow">IMAGE GENERATION / CONTACT SHEET</span><h3 id="previewTitle"></h3><p id="previewSubtitle"></p></div><div class="sheet-id">FRAME / MAKER</div></div><div id="sheetGrid" class="sheet-grid"></div><div class="sheet-footer"><span>CONTACT SHEET</span><span id="sheetFooterCount">01 BOX</span></div></div></div>
-        <div class="workspace-footnote">※ プレビューは固定幅で表示しています。PNGは元画像の画素数を保持できる解像度を計算して書き出します。ブラウザの限界を超える場合は画質を落とさずにエラーを表示します。<span id="dirtyFlag"></span></div>
+        <div class="preview-top"><div><span class="section-kicker">LIVE PREVIEW</span><h2>画像プレビュー</h2></div><div class="preview-meta"><span id="status" role="status">準備完了</span><span>PNG・元画像の解像度を優先</span></div></div>
+        <div class="preview-scroll" id="previewScroll">
+          <div class="sheet" id="sheetPreview">
+            <div id="sheetGrid" class="sheet-grid columns-1"></div>
+          </div>
+        </div>
+        <p class="workspace-footnote">プレビューの画像は表示幅に合わせています。PNG保存時は元画像の画素数を確保し、出力可能な上限を超える場合は縮小せずエラーを表示します。</p>
       </main>
     </div>
   </div>
