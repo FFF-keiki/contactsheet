@@ -14,10 +14,10 @@
     boxBtn: $('downloadBoxBtn'),
   };
   let nextId = 1;
-  let state = {boxes: [], selectedId: null, columns: 1};
+  let state = {boxes: [], selectedId: null, columns: 1, modelNames: []};
   let toastTimeout, busy = false;
 
-  const newBox = () => ({id: nextId++, modelName: '', reference: null,
+  const newBox = () => ({id: nextId++, modelName: '', modelParameter: '', fidelity: '', lineWeight: '', taper: '', reference: null,
     referenceName: '', results: [], prompt: '', memo: ''});
   const selected = () => state.boxes.find(b => b.id === state.selectedId) || null;
   const pad = n => String(n).padStart(2, '0');
@@ -125,7 +125,9 @@
       up.disabled = index === 0;
       down.disabled = index === state.boxes.length - 1;
       reorder.append(up,down);
-      row.append(node('span','box-num',pad(index+1)),open,reorder);
+      const remove = button('削除', 'delete-row-btn', () => removeBox(box.id), `ボックス ${pad(index+1)} を削除`);
+      remove.disabled = busy;
+      row.append(node('span','box-num',pad(index+1)),open,reorder,remove);
       els.boxList.append(row);
     });
   }
@@ -135,6 +137,101 @@
     [state.boxes[index],state.boxes[other]] = [state.boxes[other],state.boxes[index]];
     renderList(); renderSheet();
   }
+  function removeBox(id) {
+    if (busy) return;
+    const index = state.boxes.findIndex(b => b.id === id);
+    if (index < 0) return;
+    if (!confirm(`ボックス ${pad(index+1)} を削除しますか？\nこの操作は取り消せません。`)) return;
+    revokeBox(state.boxes[index]);
+    state.boxes.splice(index, 1);
+    if (state.selectedId === id) {
+      state.selectedId = state.boxes[Math.min(index, state.boxes.length - 1)]?.id ?? null;
+    }
+    render();
+    announce('ボックスを削除しました');
+  }
+  function numericDropdown(box, labelText, key, values) {
+    const label = node('label', 'field compact-field', labelText);
+    const select = node('select');
+    select.setAttribute('aria-label', labelText);
+    const empty = node('option', '', '未設定');
+    empty.value = '';
+    select.append(empty);
+    values.forEach(value => {
+      const option = node('option', '', String(value));
+      option.value = String(value);
+      select.append(option);
+    });
+    select.value = box[key] || '';
+    select.addEventListener('change', () => {box[key] = select.value; renderSheet();});
+    label.append(select);
+    return label;
+  }
+  function steppedValues(start, end, step) {
+    const count = Math.round((end - start) / step);
+    return Array.from({length: count + 1}, (_, i) => Number((start + i * step).toFixed(2)));
+  }
+  function modelSettings(box) {
+    const section = node('section', 'model-settings');
+    section.append(node('h3', 'model-section-heading', 'カスタムモデル情報'));
+    const label = node('label','field','カスタムモデル名');
+    const select = node('select');
+    select.setAttribute('aria-label', 'カスタムモデル名');
+    const empty = node('option','','モデルを選択'); empty.value='';
+    select.append(empty);
+    state.modelNames.forEach(name => {
+      const option = node('option','',name);
+      option.value = name;
+      select.append(option);
+    });
+    select.value = box.modelName;
+    select.addEventListener('change', () => {
+      box.modelName = select.value;
+      remove.disabled = !select.value;
+      renderSheet();
+    });
+    label.append(select);
+    section.append(label);
+    const actions = node('div','model-name-actions');
+    const addInput = node('input');
+    addInput.type = 'text';
+    addInput.maxLength = 120;
+    addInput.placeholder = '追加するモデル名';
+    addInput.setAttribute('aria-label', '追加するカスタムモデル名');
+    const add = button('＋ 追加', 'model-add', () => {
+      const name = addInput.value.trim();
+      if (!name) {announce('追加するモデル名を入力してください'); addInput.focus(); return;}
+      if (state.modelNames.includes(name)) {announce('このモデル名は既に登録されています'); return;}
+      state.modelNames.push(name);
+      box.modelName = name;
+      renderEditor(); renderSheet();
+      announce(`モデル「${name}」を追加しました`);
+    }, 'カスタムモデル名を追加');
+    addInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {e.preventDefault(); add.click();}
+    });
+    const remove = button('－ 削除', 'model-remove', () => {
+      const name = select.value;
+      if (!name) return;
+      if (!confirm(`モデル「${name}」を一覧から削除しますか？\n使用中のボックスからもモデル名の選択を解除します。`)) return;
+      state.modelNames = state.modelNames.filter(item => item !== name);
+      state.boxes.forEach(item => {if (item.modelName === name) item.modelName='';});
+      renderEditor(); renderSheet();
+      announce('モデル名を一覧から削除しました');
+    }, '選択中のカスタムモデル名を削除');
+    remove.disabled = !box.modelName;
+    actions.append(addInput,add,remove);
+    section.append(actions);
+    const params = node('div','model-params-grid');
+    params.append(
+      numericDropdown(box, 'モデルパラメーター', 'modelParameter', steppedValues(0.1, 1, 0.1)),
+      numericDropdown(box, '入力画像への忠実度', 'fidelity', steppedValues(0.05, 1, 0.05)),
+      numericDropdown(box, '線の太さ', 'lineWeight', steppedValues(-1, 1, 0.1)),
+      numericDropdown(box, '入り抜き', 'taper', steppedValues(-1, 1, 0.1)),
+    );
+    section.append(params);
+    return section;
+  }
   function renderEditor() {
     const box = selected();
     els.boxEditor.replaceChildren();
@@ -142,8 +239,7 @@
     if (!box) return;
     const edit = (key, value) => {box[key] = value; renderSheet();};
     els.boxEditor.append(
-      field('モデル情報（画像ではなくテキスト）', 'textarea', box.modelName,
-        value => edit('modelName',value), '例：モデル名 / バージョン / 設定値'),
+      modelSettings(box),
       assetInput(box, 'reference', '参考画像'),
       field('参考画像の説明（任意）', 'input', box.referenceName,
         value => edit('referenceName',value), '例：ポーズ・構図の参考'),
@@ -154,14 +250,7 @@
         value => edit('memo',value), '気づいたこと・比較結果'),
     );
     const actions = node('div','inline-buttons');
-    actions.append(button('このボックスを削除', 'delete-box', () => {
-      const index = state.boxes.findIndex(b => b.id === box.id);
-      if (index < 0) return;
-      revokeBox(box);
-      state.boxes.splice(index,1);
-      state.selectedId = state.boxes[Math.min(index,state.boxes.length-1)]?.id ?? null;
-      render(); announce('ボックスを削除しました');
-    }));
+    actions.append(button('このボックスを削除', 'delete-box', () => removeBox(box.id)));
     els.boxEditor.append(actions);
   }
   function photo(asset, alt) {
@@ -177,10 +266,29 @@
   function makeCard(box, index) {
     const card = node('article', 'sheet-card');
     card.id = `box-${box.id}`;
-    // No title, card heading or badge in the exported image.
-    if (box.modelName.trim()) {
+    // No title/footer: keep model metadata compact to maximize photo area.
+    const metrics = [
+      ['モデルパラメーター', box.modelParameter],
+      ['入力画像への忠実度', box.fidelity],
+      ['線の太さ', box.lineWeight],
+      ['入り抜き', box.taper],
+    ].filter(([, value]) => value !== '');
+    if (box.modelName || metrics.length) {
       const modelLine = node('div','model-strip');
-      modelLine.append(node('span','model-label','MODEL'),node('span','model-value',box.modelName));
+      if (box.modelName) {
+        const line = node('div','model-identity');
+        line.append(node('span','model-label','CUSTOM MODEL'),node('span','model-value',box.modelName));
+        modelLine.append(line);
+      }
+      if (metrics.length) {
+        const metricRow = node('div','model-metrics');
+        metrics.forEach(([label,value]) => {
+          const item = node('span','model-metric');
+          item.append(node('span','model-metric-label',label),node('strong','',value));
+          metricRow.append(item);
+        });
+        modelLine.append(metricRow);
+      }
       card.append(modelLine);
     }
     const comparison = node('div', 'media-two');
@@ -215,6 +323,8 @@
   function renderSheet() {
     els.sheetGrid.classList.toggle('columns-1', state.columns===1);
     els.sheetGrid.replaceChildren(...state.boxes.map(makeCard));
+    if (!state.boxes.length) els.sheetGrid.append(node('div','empty-sheet','ボックスがありません。左側の「＋ 追加」から作成できます。'));
+    els.exportBtn.disabled = busy || !state.boxes.length;
   }
   function render() {renderList(); renderEditor(); renderSheet();}
   async function imageReady(img) {
@@ -284,6 +394,7 @@
     state.boxes = [newBox()];
     state.selectedId = state.boxes[0].id;
     state.columns = 1;
+    state.modelNames = [];
     els.columns.value = '1';
     render();
   }
@@ -291,7 +402,12 @@
   function demo() {
     reset();
     const a = state.boxes[0];
-    a.modelName = 'イラスト生成モデル A / 検証用設定';
+    state.modelNames = ['イラスト生成モデル A', 'イラスト生成モデル B'];
+    a.modelName = 'イラスト生成モデル A';
+    a.modelParameter = '0.5';
+    a.fidelity = '0.85';
+    a.lineWeight = '0.2';
+    a.taper = '-0.3';
     a.reference = demoAsset('./samples/reference-sunset.svg','reference-sunset.svg');
     a.results = [demoAsset('./samples/output-portrait.svg','output-portrait.svg')];
     a.referenceName = '色味と構図の参考';
@@ -299,6 +415,10 @@
     a.memo = '参考画像と生成結果を大きく表示するサンプル。';
     const b = newBox();
     b.modelName = 'イラスト生成モデル B';
+    b.modelParameter = '0.7';
+    b.fidelity = '0.65';
+    b.lineWeight = '-0.1';
+    b.taper = '0.5';
     b.reference = demoAsset('./samples/reference-mecha.svg','reference-mecha.svg');
     b.results = [demoAsset('./samples/output-mecha.svg','output-mecha.svg')];
     b.memo = 'メカデザイン比較。';

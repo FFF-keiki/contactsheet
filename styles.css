@@ -64,3 +64,29 @@ button:disabled{opacity:.55;cursor:wait}
     scrollbar-gutter: stable;
   }
 }
+
+/* v4: inline box deletion and editable custom-model presets. */
+.box-list-row{gap:6px;padding:8px 7px}
+.box-open{flex:1;min-width:0}
+.delete-row-btn{flex:none;border:1px solid #efd4ce;background:#fff;border-radius:5px;color:#b26559;font-size:10px;font-weight:700;padding:5px 6px}
+.delete-row-btn:hover,.delete-box:hover,.model-remove:hover{background:#fff2ee}
+.model-settings{border:1px solid #e5e9f0;border-radius:9px;padding:12px;margin:0 0 18px;background:#fbfcfe}
+.model-section-heading{font-size:12px;font-weight:800;margin:0 0 14px;color:#364961}
+.model-name-actions{display:flex;align-items:center;gap:5px;margin:-5px 0 13px}
+.model-name-actions input{flex:1;width:40px;min-width:0;border:1px solid #dfe5ee;border-radius:6px;padding:9px 7px;color:#28384d;font-size:11px}
+.model-name-actions input:focus{outline:1px solid #d79b80}
+.model-name-actions button{flex:none;border:1px solid #e5e9ef;background:#fff;border-radius:6px;font-size:10px;padding:9px 6px;color:#56677c;font-weight:750}
+.model-name-actions .model-add{color:#a76a52;border-color:#edc7b6;background:#fffaf7}
+.model-name-actions .model-remove{color:#b26559}
+.model-name-actions button:disabled{cursor:not-allowed;opacity:.4}
+.model-params-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:9px;row-gap:4px}
+.model-params-grid .field{min-width:0;margin-bottom:6px;font-size:10px}
+.model-params-grid select{font-size:12px;padding:9px 6px}
+.model-strip{display:flex;flex-direction:column;gap:7px;padding-bottom:7px}
+.model-identity{display:flex;align-items:baseline;gap:10px;overflow-wrap:anywhere}
+.model-value{font-size:13px}
+.model-metrics{display:flex;align-items:center;flex-wrap:wrap;gap:6px 13px}
+.model-metric{display:inline-flex;gap:5px;align-items:baseline;white-space:nowrap;font-size:11px;color:#34445a}
+.model-metric-label{font-size:10px;color:#8593a6}
+.model-metric strong{font-size:11px;color:#26354a}
+.empty-sheet{border:1px dashed #dce3ed;padding:45px 20px;color:#8998ac;text-align:center;font-size:12px}
