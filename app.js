@@ -3,9 +3,9 @@
 
   const $ = (id) => document.getElementById(id);
   const KINDS = [
-    {key: 'result', label: 'RESULT', jp: '生成結果'},
-    {key: 'ideal', label: 'IDEAL', jp: '理想の画像'},
     {key: 'reference', label: 'REFERENCE', jp: '参考画像'},
+    {key: 'ideal', label: 'IDEAL', jp: '理想の画像'},
+    {key: 'result', label: 'RESULT', jp: '生成結果'},
   ];
   const escapeHtml = (value = '') => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
@@ -100,10 +100,10 @@
     const cols = images.length===1 ? 1 : images.length<=4 ? 2 : 3;
     return `<div class="media-gallery ${images.length > 1 ? 'has-many':''}" style="--gallery-cols:${cols}">${images.map(img=>`<img src="${img.data}" alt="${escapeHtml(img.name)}" data-natural-w="${img.width}" data-natural-h="${img.height}">`).join('')}</div>`;
   }
-  function previewSection(box, kind, isReference = false){
+  function previewSection(box, kind, isWide = false){
     return `<section class="media-section" aria-label="${kind.label}">
       <div class="media-heading">${kind.label}</div>
-      <div class="media-panel ${isReference?'reference-panel':'top-panel'}">${imagesHtml(box.images[kind.key])}</div>
+      <div class="media-panel ${isWide?'result-panel':'top-panel'}">${imagesHtml(box.images[kind.key])}</div>
     </section>`;
   }
   function meta(label, value, wide = false) {
