@@ -1,451 +1,295 @@
-/**
- * FRAME / MAKER: browser-only contact sheet builder.
- * Model is TEXT, image slots are REFERENCE and RESULT. No JSON/storage/upload API.
- * Source File objects are never modified. PNG export is lossless and blocks
- * export rather than reducing output resolution if canvas limits are exceeded.
- */
 (() => {
   'use strict';
-  const $ = id => document.getElementById(id);
-  const els = {
-    boxList: $('boxList'), boxEditor: $('boxEditor'), boxCount: $('boxCount'),
-    columns: $('sheetColumns'), sheetGrid: $('sheetGrid'), sheet: $('sheetPreview'),
-    status: $('status'), toast: $('toast'), exportBtn: $('exportPngBtn'),
-    boxBtn: $('downloadBoxBtn'),
-  };
-  let nextId = 1;
-  let state = {boxes: [], selectedId: null, columns: 1, modelNames: []};
-  let toastTimeout, busy = false;
 
-  const newBox = () => ({id: nextId++, modelName: '', modelParameter: '', fidelity: '', lineWeight: '', taper: '', reference: null,
-    referenceName: '', results: [], prompt: '', memo: ''});
-  const selected = () => state.boxes.find(b => b.id === state.selectedId) || null;
+  const $ = (id) => document.getElementById(id);
+  const KINDS = [
+    {key: 'result', label: 'RESULT', jp: '生成結果'},
+    {key: 'ideal', label: 'IDEAL', jp: '理想の画像'},
+    {key: 'reference', label: 'REFERENCE', jp: '参考画像'},
+  ];
+  const escapeHtml = (value = '') => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  let modelNames = [];
+  let boxes = [makeBox()];
+  let activeBoxId = boxes[0].id;
+  let isSaving = false;
+
+  function makeBox() {
+    return {
+      id: uid(), modelName:'', modelParameter:'0.1', fidelity:'0.5', lineWidth:'0', taper:'0',
+      prompt:'', memo:'', images:{result:[], ideal:[], reference:[]},
+    };
+  }
+  const selected = () => boxes.find(b => b.id === activeBoxId) || boxes[0];
+  const idxOf = (id) => boxes.findIndex(b => b.id === id);
   const pad = n => String(n).padStart(2, '0');
-  function node(tag, cls, content) {
-    const el = document.createElement(tag);
-    if (cls) el.className = cls;
-    if (content != null) el.textContent = content;
-    return el;
+
+  function setStatus(message, type = '') {
+    const status = $('status');
+    status.textContent = message;
+    status.className = 'status' + (type ? ` ${type}` : '');
   }
-  function button(text, cls, onClick, ariaLabel) {
-    const b = node('button', cls, text);
-    b.type = 'button';
-    if (ariaLabel) b.setAttribute('aria-label', ariaLabel);
-    b.addEventListener('click', onClick);
-    return b;
-  }
-  function announce(message, ms = 3700) {
-    els.status.textContent = message;
-    els.toast.textContent = message;
-    els.toast.classList.add('show');
-    clearTimeout(toastTimeout);
-    toastTimeout = setTimeout(() => els.toast.classList.remove('show'), ms);
-  }
-  function field(text, type, value, onInput, placeholder = '') {
-    const label = node('label', 'field', text);
-    const control = node(type);
-    control.value = value ?? '';
-    control.placeholder = placeholder;
-    if (type === 'textarea') control.rows = 2;
-    control.addEventListener('input', event => onInput(event.target.value));
-    label.append(control);
-    return label;
-  }
-  function revokeAsset(asset) {
-    if (asset?.url?.startsWith('blob:')) URL.revokeObjectURL(asset.url);
-  }
-  function revokeBox(box) {
-    revokeAsset(box.reference);
-    box.results.forEach(revokeAsset);
-  }
-  function asAsset(file) {
-    return {name: file.name, url: URL.createObjectURL(file), file};
-  }
-  function setImage(box, key, files) {
-    const images = Array.from(files || []).filter(f => f.type.startsWith('image/'));
-    if (!images.length) {announce('画像ファイルを選択してください'); return;}
-    if (key === 'results') {
-      box.results.push(...images.map(asAsset));
-    } else {
-      revokeAsset(box[key]);
-      box[key] = asAsset(images[0]);
+  function options(start, end, step, chosen, optional = false) {
+    const values = [];
+    if (optional) values.push('<option value="">未指定</option>');
+    const len = Math.round((end - start) / step);
+    for(let i = 0; i <= len; i++){
+      const n = Number((start + i*step).toFixed(3));
+      const value = String(n);
+      values.push(`<option value="${value}" ${String(chosen) === value ? 'selected' : ''}>${value}</option>`);
     }
-    renderEditor(); renderSheet(); renderList();
-    announce('元画像を加工せずに読み込みました');
-  }
-  function assetInput(box, key, heading, multiple = false) {
-    const root = node('div', 'upload-control');
-    root.append(node('div', 'upload-caption', heading));
-    const assets = key === 'results' ? box.results : (box[key] ? [box[key]] : []);
-    assets.forEach((asset, index) => {
-      const row = node('div', 'asset-input-row');
-      const img = node('img', 'asset-thumb');
-      img.src = asset.url;
-      img.alt = '';
-      const actions = node('div', 'asset-actions');
-      actions.append(node('span', 'asset-filename', asset.name));
-      actions.append(button('削除', 'remove-asset', () => {
-        revokeAsset(asset);
-        if (key === 'results') box.results.splice(index, 1);
-        else box[key] = null;
-        renderEditor(); renderSheet(); renderList();
-      }, `${asset.name} を削除`));
-      row.append(img, actions); root.append(row);
-    });
-    const zone = node('label', 'upload-zone');
-    zone.append(node('span', 'upload-icon', '＋'));
-    zone.append(node('strong', '', multiple ? '画像をまとめて追加' : '画像を選択 / ドロップ'));
-    zone.append(node('small', '', '画像を変換せずに読み込み'));
-    const input = node('input');
-    input.type = 'file'; input.accept = 'image/*'; input.multiple = multiple;
-    input.setAttribute('aria-label', heading);
-    input.addEventListener('change', () => {setImage(box,key,input.files); input.value='';});
-    zone.addEventListener('dragover', event => {event.preventDefault();zone.classList.add('dragover');});
-    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-    zone.addEventListener('drop', event => {
-      event.preventDefault(); zone.classList.remove('dragover');
-      setImage(box, key, event.dataTransfer.files);
-    });
-    zone.append(input); root.append(zone);
-    return root;
+    return values.join('');
   }
   function renderList() {
-    els.boxList.replaceChildren();
-    els.boxCount.textContent = String(state.boxes.length);
-    state.boxes.forEach((box, index) => {
-      const row = node('div', 'box-list-row' + (box.id === state.selectedId ? ' active' : ''));
-      const open = button('', 'box-open', () => {
-        state.selectedId = box.id; renderList(); renderEditor();
-      });
-      open.append(node('strong', '', `ボックス ${pad(index+1)}`));
-      open.append(node('small', '', `参考 ${box.reference ? 1 : 0}枚 / 生成 ${box.results.length}枚`));
-      const reorder = node('div', 'reorder');
-      const up = button('↑', '', () => move(index,-1), '上へ移動');
-      const down = button('↓', '', () => move(index,1), '下へ移動');
-      up.disabled = index === 0;
-      down.disabled = index === state.boxes.length - 1;
-      reorder.append(up,down);
-      const remove = button('削除', 'delete-row-btn', () => removeBox(box.id), `ボックス ${pad(index+1)} を削除`);
-      remove.disabled = busy;
-      row.append(node('span','box-num',pad(index+1)),open,reorder,remove);
-      els.boxList.append(row);
-    });
+    $('boxCount').textContent = boxes.length;
+    $('boxList').innerHTML = boxes.map((b, i) => {
+      const photoCount = Object.values(b.images).reduce((n,a) => n + a.length,0);
+      return `<div class="box-item ${b.id === activeBoxId ? 'active':''}" data-select-id="${b.id}">
+        <div class="box-num">${pad(i+1)}</div>
+        <div><div class="box-title">ボックス ${pad(i+1)}</div><div class="box-sub">画像 ${photoCount}枚 ／ ${escapeHtml(b.modelName || 'モデル未指定')}</div></div>
+        <div class="box-commands">
+          <button class="icon-btn" title="上へ" aria-label="ボックス${i+1}を上へ" data-action="up" data-id="${b.id}" ${i===0?'disabled':''}>↑</button>
+          <button class="icon-btn" title="下へ" aria-label="ボックス${i+1}を下へ" data-action="down" data-id="${b.id}" ${i===boxes.length-1?'disabled':''}>↓</button>
+          <button class="icon-btn danger" title="ボックスを削除" aria-label="ボックス${i+1}を削除" data-action="delete" data-id="${b.id}">×</button>
+        </div>
+      </div>`;
+    }).join('');
   }
-  function move(index, offset) {
-    const other = index + offset;
-    if (other < 0 || other >= state.boxes.length) return;
-    [state.boxes[index],state.boxes[other]] = [state.boxes[other],state.boxes[index]];
-    renderList(); renderSheet();
+  function renderImageEditor(kind, box) {
+    const images = box.images[kind.key];
+    return `<div class="upload-block">
+      <div class="upload-block-title">${kind.label} <span>${kind.jp}・${images.length}枚</span></div>
+      <label class="dropzone" data-drop-kind="${kind.key}" for="file-${kind.key}">
+        <strong>＋</strong>クリックまたはドラッグ＆ドロップで追加<br>複数枚を選択可能
+      </label>
+      <input id="file-${kind.key}" type="file" data-file-kind="${kind.key}" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+      <div class="file-list">${images.map((img,i)=>`<div class="file-row">
+        <img src="${img.data}" alt=""><div class="file-info"><div class="file-name" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</div><div class="file-meta">${img.width} × ${img.height}px</div></div>
+        <button type="button" class="file-delete" title="この画像を削除" aria-label="${escapeHtml(img.name)}を削除" data-remove-file="${kind.key}" data-index="${i}">削除</button>
+      </div>`).join('')}</div>
+    </div>`;
   }
-  function removeBox(id) {
-    if (busy) return;
-    const index = state.boxes.findIndex(b => b.id === id);
-    if (index < 0) return;
-    if (!confirm(`ボックス ${pad(index+1)} を削除しますか？\nこの操作は取り消せません。`)) return;
-    revokeBox(state.boxes[index]);
-    state.boxes.splice(index, 1);
-    if (state.selectedId === id) {
-      state.selectedId = state.boxes[Math.min(index, state.boxes.length - 1)]?.id ?? null;
-    }
-    render();
-    announce('ボックスを削除しました');
-  }
-  function numericDropdown(box, labelText, key, values) {
-    const label = node('label', 'field compact-field', labelText);
-    const select = node('select');
-    select.setAttribute('aria-label', labelText);
-    const empty = node('option', '', '未設定');
-    empty.value = '';
-    select.append(empty);
-    values.forEach(value => {
-      const option = node('option', '', String(value));
-      option.value = String(value);
-      select.append(option);
-    });
-    select.value = box[key] || '';
-    select.addEventListener('change', () => {box[key] = select.value; renderSheet();});
-    label.append(select);
-    return label;
-  }
-  function steppedValues(start, end, step) {
-    const count = Math.round((end - start) / step);
-    return Array.from({length: count + 1}, (_, i) => Number((start + i * step).toFixed(2)));
-  }
-  function modelSettings(box) {
-    const section = node('section', 'model-settings');
-    section.append(node('h3', 'model-section-heading', 'カスタムモデル情報'));
-    const label = node('label','field','カスタムモデル名');
-    const select = node('select');
-    select.setAttribute('aria-label', 'カスタムモデル名');
-    const empty = node('option','','モデルを選択'); empty.value='';
-    select.append(empty);
-    state.modelNames.forEach(name => {
-      const option = node('option','',name);
-      option.value = name;
-      select.append(option);
-    });
-    select.value = box.modelName;
-    select.addEventListener('change', () => {
-      box.modelName = select.value;
-      remove.disabled = !select.value;
-      renderSheet();
-    });
-    label.append(select);
-    section.append(label);
-    const actions = node('div','model-name-actions');
-    const addInput = node('input');
-    addInput.type = 'text';
-    addInput.maxLength = 120;
-    addInput.placeholder = '追加するモデル名';
-    addInput.setAttribute('aria-label', '追加するカスタムモデル名');
-    const add = button('＋ 追加', 'model-add', () => {
-      const name = addInput.value.trim();
-      if (!name) {announce('追加するモデル名を入力してください'); addInput.focus(); return;}
-      if (state.modelNames.includes(name)) {announce('このモデル名は既に登録されています'); return;}
-      state.modelNames.push(name);
-      box.modelName = name;
-      renderEditor(); renderSheet();
-      announce(`モデル「${name}」を追加しました`);
-    }, 'カスタムモデル名を追加');
-    addInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter') {e.preventDefault(); add.click();}
-    });
-    const remove = button('－ 削除', 'model-remove', () => {
-      const name = select.value;
-      if (!name) return;
-      if (!confirm(`モデル「${name}」を一覧から削除しますか？\n使用中のボックスからもモデル名の選択を解除します。`)) return;
-      state.modelNames = state.modelNames.filter(item => item !== name);
-      state.boxes.forEach(item => {if (item.modelName === name) item.modelName='';});
-      renderEditor(); renderSheet();
-      announce('モデル名を一覧から削除しました');
-    }, '選択中のカスタムモデル名を削除');
-    remove.disabled = !box.modelName;
-    actions.append(addInput,add,remove);
-    section.append(actions);
-    const params = node('div','model-params-grid');
-    params.append(
-      numericDropdown(box, 'モデルパラメーター', 'modelParameter', steppedValues(0.1, 1, 0.1)),
-      numericDropdown(box, '入力画像への忠実度', 'fidelity', steppedValues(0.05, 1, 0.05)),
-      numericDropdown(box, '線の太さ', 'lineWeight', steppedValues(-1, 1, 0.1)),
-      numericDropdown(box, '入り抜き', 'taper', steppedValues(-1, 1, 0.1)),
-    );
-    section.append(params);
-    return section;
-  }
-  function renderEditor() {
+  function renderEditor(){
     const box = selected();
-    els.boxEditor.replaceChildren();
-    els.boxBtn.disabled = !box || busy;
     if (!box) return;
-    const edit = (key, value) => {box[key] = value; renderSheet();};
-    els.boxEditor.append(
-      modelSettings(box),
-      assetInput(box, 'reference', '参考画像'),
-      field('参考画像の説明（任意）', 'input', box.referenceName,
-        value => edit('referenceName',value), '例：ポーズ・構図の参考'),
-      assetInput(box, 'results', '生成結果（複数枚OK）', true),
-      field('プロンプト', 'textarea', box.prompt,
-        value => edit('prompt',value), '使用したプロンプト'),
-      field('検証メモ', 'textarea', box.memo,
-        value => edit('memo',value), '気づいたこと・比較結果'),
-    );
-    const actions = node('div','inline-buttons');
-    actions.append(button('このボックスを削除', 'delete-box', () => removeBox(box.id)));
-    els.boxEditor.append(actions);
+    $('boxEditor').innerHTML = `<section class="editor-section">
+      <div class="section-head"><h3 class="editor-heading">ボックス ${pad(idxOf(box.id)+1)} の設定</h3></div>
+      <div class="field"><label for="model-select">カスタムモデル名</label><div class="select-row">
+        <select id="model-select" data-field="modelName"><option value="">未指定</option>${modelNames.map(name => `<option value="${escapeHtml(name)}" ${box.modelName===name?'selected':''}>${escapeHtml(name)}</option>`).join('')}</select>
+        <button type="button" class="btn btn-ghost btn-small" id="deleteModel" ${!box.modelName?'disabled':''} title="選択中のモデル名を一覧から削除">削除</button>
+      </div></div>
+      <div class="field-row">
+        <div class="field"><label for="modelParameter">モデルパラメーター</label><select id="modelParameter" data-field="modelParameter">${options(.1,1,.1,box.modelParameter)}</select></div>
+        <div class="field"><label for="fidelity">入力画像への忠実度</label><select id="fidelity" data-field="fidelity">${options(.05,1,.05,box.fidelity)}</select></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="lineWidth">線の太さ</label><select id="lineWidth" data-field="lineWidth">${options(-1,1,.1,box.lineWidth)}</select></div>
+        <div class="field"><label for="taper">入り抜き</label><select id="taper" data-field="taper">${options(-1,1,.1,box.taper)}</select></div>
+      </div>
+    </section>
+    <section class="editor-section"><h3 class="editor-heading">画像の登録</h3>
+      ${KINDS.map(kind => renderImageEditor(kind,box)).join('')}
+    </section>
+    <section class="editor-section"><h3 class="editor-heading">検証メモ</h3>
+      <div class="field"><label for="prompt">プロンプト</label><textarea id="prompt" data-field="prompt" placeholder="生成時の指示を入力">${escapeHtml(box.prompt)}</textarea></div>
+      <div class="field"><label for="memo">メモ</label><textarea id="memo" data-field="memo" placeholder="比較結果・気づいたことなど">${escapeHtml(box.memo)}</textarea></div>
+    </section>`;
   }
-  function photo(asset, alt) {
-    const holder = node('div', 'media-photo' + (asset ? '' : ' blank'));
-    if (!asset) holder.append(node('span', '', '画像を追加してください'));
-    else {
-      const img = node('img'); img.src = asset.url; img.alt = alt;
-      img.decoding = 'sync';
-      holder.append(img);
-    }
-    return holder;
+  function imagesHtml(images) {
+    if(!images.length) return '<div class="media-placeholder"><strong>＋</strong>画像未登録</div>';
+    const cols = images.length===1 ? 1 : images.length<=4 ? 2 : 3;
+    return `<div class="media-gallery ${images.length > 1 ? 'has-many':''}" style="--gallery-cols:${cols}">${images.map(img=>`<img src="${img.data}" alt="${escapeHtml(img.name)}" data-natural-w="${img.width}" data-natural-h="${img.height}">`).join('')}</div>`;
   }
-  function makeCard(box, index) {
-    const card = node('article', 'sheet-card');
-    card.id = `box-${box.id}`;
-    // No title/footer: keep model metadata compact to maximize photo area.
-    const metrics = [
-      ['モデルパラメーター', box.modelParameter],
-      ['入力画像への忠実度', box.fidelity],
-      ['線の太さ', box.lineWeight],
-      ['入り抜き', box.taper],
-    ].filter(([, value]) => value !== '');
-    if (box.modelName || metrics.length) {
-      const modelLine = node('div','model-strip');
-      if (box.modelName) {
-        const line = node('div','model-identity');
-        line.append(node('span','model-label','CUSTOM MODEL'),node('span','model-value',box.modelName));
-        modelLine.append(line);
-      }
-      if (metrics.length) {
-        const metricRow = node('div','model-metrics');
-        metrics.forEach(([label,value]) => {
-          const item = node('span','model-metric');
-          item.append(node('span','model-metric-label',label),node('strong','',value));
-          metricRow.append(item);
-        });
-        modelLine.append(metricRow);
-      }
-      card.append(modelLine);
-    }
-    const comparison = node('div', 'media-two');
-    const reference = node('div', 'media-col');
-    reference.append(node('div','media-title','REFERENCE'),photo(box.reference,'参考画像'));
-    if (box.referenceName.trim()) reference.append(node('div','media-name',box.referenceName));
-    const output = node('div', 'media-col');
-    output.append(node('div','media-title','RESULT'));
-    const results = node('div','result-images');
-    if (!box.results.length) results.append(photo(null,'生成結果'));
-    box.results.forEach((asset, i) => {
-      const item = node('div','result-item');
-      item.append(photo(asset,`生成結果 ${i+1}`));
-      if (box.results.length > 1) item.append(node('div','result-index',`${pad(i+1)} / ${pad(box.results.length)}`));
-      results.append(item);
-    });
-    output.append(results);
-    comparison.append(reference,output);
-    card.append(comparison);
-    if (box.prompt.trim() || box.memo.trim()) {
-      const notes = node('div','card-notes');
-      for (const [label,value] of [['PROMPT',box.prompt],['MEMO',box.memo]]) {
-        if (!value.trim()) continue;
-        const line = node('div','note-line');
-        line.append(node('span','note-label',label),node('span','',value));
-        notes.append(line);
-      }
-      card.append(notes);
-    }
-    return card;
+  function previewSection(box, kind, isReference = false){
+    return `<section class="media-section" aria-label="${kind.label}">
+      <div class="media-heading">${kind.label}</div>
+      <div class="media-panel ${isReference?'reference-panel':'top-panel'}">${imagesHtml(box.images[kind.key])}</div>
+    </section>`;
   }
-  function renderSheet() {
-    els.sheetGrid.classList.toggle('columns-1', state.columns===1);
-    els.sheetGrid.replaceChildren(...state.boxes.map(makeCard));
-    if (!state.boxes.length) els.sheetGrid.append(node('div','empty-sheet','ボックスがありません。左側の「＋ 追加」から作成できます。'));
-    els.exportBtn.disabled = busy || !state.boxes.length;
+  function meta(label, value, wide = false) {
+    const v = String(value ?? '').trim();
+    return v ? `<div class="metadata-line ${wide?'wide':''}"><b>${escapeHtml(label)}</b><span>${escapeHtml(v)}</span></div>` : '';
   }
-  function render() {renderList(); renderEditor(); renderSheet();}
-  async function imageReady(img) {
-    if (img.complete && img.naturalWidth && img.naturalHeight) return;
-    if (img.decode) await img.decode();
-    else await new Promise((resolve,reject) => {
-      img.addEventListener('load', resolve, {once:true});
-      img.addEventListener('error', reject, {once:true});
-    });
-    if (!img.naturalWidth || !img.naturalHeight) throw new Error('読み込めない画像があります');
+  function renderPreview(){
+    $('captureSurface').innerHTML = boxes.map((box,i)=>{
+      const modelInfo = [box.modelName,`モデルパラメーター ${box.modelParameter}`,`忠実度 ${box.fidelity}`,`線の太さ ${box.lineWidth}`,`入り抜き ${box.taper}`].filter(Boolean).join(' ／ ');
+      const metadata = meta('CUSTOM MODEL',modelInfo,true)+meta('PROMPT',box.prompt,true)+meta('MEMO',box.memo,true);
+      return `<article class="sheet-card ${box.id===activeBoxId?'selected':''}" data-preview-id="${box.id}" aria-label="ボックス ${i+1}">
+        <div class="output-layout">
+          <div class="comparison-grid">
+            ${previewSection(box,KINDS[0])}
+            ${previewSection(box,KINDS[1])}
+          </div>
+          ${previewSection(box,KINDS[2],true)}
+        </div>
+        ${metadata ? `<div class="metadata">${metadata}</div>`:''}
+      </article>`;
+    }).join('');
   }
-  function determineExportSize(el) {
-    let pixelRatio = 2, limitingImage = null;
-    for (const img of el.querySelectorAll('.media-photo img')) {
-      const bounds = img.getBoundingClientRect();
-      if (bounds.width < 1 || bounds.height < 1 || !img.naturalWidth) continue;
-      // The previews have width:100% and height:auto; source aspect is preserved.
-      const need = Math.ceil(Math.max(img.naturalWidth / bounds.width,
-                                     img.naturalHeight / bounds.height));
-      if (need > pixelRatio) {
-        pixelRatio = need;
-        limitingImage = `${img.naturalWidth} × ${img.naturalHeight}px`;
-      }
-    }
-    return {pixelRatio, width:Math.ceil(el.scrollWidth*pixelRatio),
-      height:Math.ceil(el.scrollHeight*pixelRatio), limitingImage};
+  function renderAll(){renderList();renderEditor();renderPreview();}
+  function move(id,change){
+    const at=idxOf(id), next=at+change;
+    if(at<0||next<0||next>=boxes.length) return;
+    [boxes[at],boxes[next]]=[boxes[next],boxes[at]];
+    renderAll();
   }
-  async function exportPng(el, filename, label) {
-    if (busy) return;
-    if (!window.htmlToImage?.toBlob) {
-      announce('PNG出力ライブラリの読み込みに失敗しました。ネットワーク接続をご確認ください。');
+  function removeBox(id){
+    const at = idxOf(id);
+    if(at<0) return;
+    if(!confirm(`ボックス ${pad(at+1)} を削除しますか？\n登録画像や入力内容は元に戻せません。`))return;
+    boxes.splice(at,1);
+    if(boxes.length===0)boxes.push(makeBox());
+    if(activeBoxId===id)activeBoxId=boxes[Math.min(at,boxes.length-1)].id;
+    renderAll();
+  }
+  $('addBox').addEventListener('click',()=>{
+    const box=makeBox();boxes.push(box);activeBoxId=box.id;renderAll();
+    $('sidebarScroll').scrollTo({top:$('sidebarScroll').scrollHeight,behavior:'smooth'});
+  });
+  $('boxList').addEventListener('click',e=>{
+    const button=e.target.closest('[data-action]');
+    if(button){
+      const {action,id}=button.dataset;
+      if(action==='up')move(id,-1);
+      else if(action==='down')move(id,1);
+      else if(action==='delete')removeBox(id);
       return;
     }
-    busy = true;
-    els.exportBtn.disabled = els.boxBtn.disabled = true;
-    try {
-      els.status.textContent = '画像の読み込みを確認しています…';
-      await Promise.all(Array.from(el.querySelectorAll('img')).map(imageReady));
-      if (document.fonts?.ready) await document.fonts.ready;
-      const {pixelRatio,width,height,limitingImage} = determineExportSize(el);
-      // Large canvas limits depend on browser/GPU; reject instead of degrading.
-      if (width > 16384 || height > 16384 || width*height > 110_000_000) {
-        throw new Error(`元画像${limitingImage ? `（${limitingImage}）` : ''}の画素数を守ると${width.toLocaleString()}×${height.toLocaleString()}pxになり、ブラウザの制限を超えます。縮小は行いません。1ボックスずつ出力するか、1列表示をお試しください。`);
+    const item=e.target.closest('[data-select-id]');
+    if(item){activeBoxId=item.dataset.selectId;renderAll();}
+  });
+  $('addModel').addEventListener('click',()=>{
+    const input=$('modelNameInput');
+    const name=input.value.trim();
+    if(!name){setStatus('追加するカスタムモデル名を入力してください。','error');return;}
+    if(modelNames.includes(name)){setStatus('同名のカスタムモデルが登録済みです。','error');return;}
+    modelNames.push(name);selected().modelName=name;input.value='';renderAll();
+    setStatus(`「${name}」を追加しました。`,'success');
+  });
+  $('modelNameInput').addEventListener('keydown',e=>{if(e.key==='Enter'){$('addModel').click();e.preventDefault();}});
+  $('boxEditor').addEventListener('click',e=>{
+    const remove=e.target.closest('[data-remove-file]');
+    if(remove){selected().images[remove.dataset.removeFile].splice(Number(remove.dataset.index),1);renderAll();return;}
+    if(e.target.closest('#deleteModel')){
+      const name=selected().modelName;
+      if(!name)return;
+      if(confirm(`カスタムモデル「${name}」を一覧から削除しますか？\n全ボックスの選択も解除されます。`)){
+        modelNames=modelNames.filter(n=>n!==name);
+        boxes.forEach(b=>{if(b.modelName===name)b.modelName='';});renderAll();
       }
-      els.status.textContent = `PNGを作成しています… ${width} × ${height}px`;
-      const blob = await window.htmlToImage.toBlob(el, {
-        pixelRatio, skipAutoScale:true, cacheBust:false, backgroundColor:'#ffffff'
-      });
-      if (!blob?.size) throw new Error('PNGを書き出せませんでした');
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url; link.download = filename;
-      document.body.append(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(url),60_000);
-      announce(`${label}をPNG保存しました（${width.toLocaleString()} × ${height.toLocaleString()}px）`,6500);
-    } catch (error) {
-      console.error(error);
-      announce(`保存できませんでした：${error.message || error}`,12000);
-    } finally {
-      busy = false;
-      els.exportBtn.disabled = false;
-      els.boxBtn.disabled = !selected();
+    }
+  });
+  $('boxEditor').addEventListener('input',e=>{
+    const f=e.target.dataset.field;
+    if(!f) return;
+    selected()[f]=e.target.value;
+    renderPreview();
+    if(f==='modelName')renderList();
+  });
+  $('boxEditor').addEventListener('change',async e=>{
+    if(e.target.dataset.field){
+      selected()[e.target.dataset.field]=e.target.value;
+      renderPreview();renderList();
+    }
+    if(e.target.dataset.fileKind){
+      const kind=e.target.dataset.fileKind;
+      const box=selected();
+      const files=Array.from(e.target.files || []);
+      await addFiles(box,kind,files);
+    }
+  });
+  ['dragenter','dragover','dragleave','drop'].forEach(type=>{
+    $('boxEditor').addEventListener(type,e=>{
+      const zone=e.target.closest('[data-drop-kind]');
+      if(!zone)return;
+      e.preventDefault();
+      if(type==='dragenter'||type==='dragover')zone.classList.add('dragover');
+      else zone.classList.remove('dragover');
+      if(type==='drop')addFiles(selected(),zone.dataset.dropKind,Array.from(e.dataTransfer.files));
+    });
+  });
+  function readFile(file){
+    return new Promise((resolve,reject)=>{
+      if(!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type)){
+        reject(new Error(`${file.name}: PNG / JPEG / WebP / GIF 形式のみ対応しています。`));return;
+      }
+      const reader=new FileReader();
+      reader.onerror=()=>reject(new Error(`${file.name}: 読み込みに失敗しました。`));
+      reader.onload=()=>{
+        const data=reader.result;
+        const img=new Image();
+        img.onerror=()=>reject(new Error(`${file.name}: 画像を開けませんでした。`));
+        img.onload=()=>resolve({name:file.name,data,width:img.naturalWidth,height:img.naturalHeight,bytes:file.size});
+        img.src=data;
+      };
+      reader.readAsDataURL(file); // 元画像を変換・圧縮せずデータURLとして保持
+    });
+  }
+  async function addFiles(box,kind,files){
+    if(!files.length)return;
+    setStatus(`${files.length}枚の画像を読み込み中…`);
+    let success=0;
+    for(const file of files){
+      try{box.images[kind].push(await readFile(file));success++;}
+      catch(err){setStatus(err.message,'error');}
+    }
+    renderAll();
+    if(success===files.length)setStatus(`${success}枚追加しました。元画像は加工していません。`,'success');
+  }
+
+  // 画像をトリミングせず contain で表示する領域の実寸から、
+  // 入力画像のピクセル数を下回らないよう書き出し倍率を求める。
+  function minimumPixelRatio(root){
+    let scale=1;
+    for(const img of root.querySelectorAll('img[data-natural-w]')){
+      const nw=Number(img.dataset.naturalW), nh=Number(img.dataset.naturalH);
+      const area=img.getBoundingClientRect();
+      if(!nw||!nh||!area.width||!area.height)continue;
+      const fit=Math.min(area.width/nw,area.height/nh);
+      if(fit>0)scale=Math.max(scale,1/fit);
+    }
+    return Math.ceil(scale * 100)/100;
+  }
+  async function exportPng(isSingle){
+    if(isSaving)return;
+    const buttonSheet=$('downloadSheet'), buttonBox=$('downloadBox');
+    isSaving=true;buttonSheet.disabled=true;buttonBox.disabled=true;
+    const root=isSingle?$('captureSurface').querySelector(`[data-preview-id="${activeBoxId}"]`):$('captureSurface');
+    try{
+      if(!root)throw new Error('出力対象のボックスがありません。');
+      if(!window.htmlToImage?.toPng)throw new Error('画像出力ライブラリを読み込めませんでした。ネット接続を確認してください。');
+      await document.fonts.ready;
+      await Promise.all(Array.from(root.querySelectorAll('img')).map(img=>img.decode().catch(()=>{})));
+      const pixelRatio=minimumPixelRatio(root);
+      const cssWidth=Math.ceil(root.getBoundingClientRect().width);
+      const cssHeight=Math.ceil(root.getBoundingClientRect().height);
+      const targetWidth=Math.ceil(cssWidth*pixelRatio);
+      const targetHeight=Math.ceil(cssHeight*pixelRatio);
+      // メモリ上限を超えている場合、勝手に画質を落とさず明示的に中止。
+      if(targetWidth>16000||targetHeight>16000||targetWidth*targetHeight>80000000){
+        throw new Error(`必要な解像度 ${targetWidth.toLocaleString()} × ${targetHeight.toLocaleString()}px はブラウザの安全な出力上限を超えます。画質は落とさず中止しました。ボックス単位の出力をお試しください。`);
+      }
+      setStatus(`高解像度PNGを作成中… ${targetWidth.toLocaleString()} × ${targetHeight.toLocaleString()}px`);
+      document.body.classList.add('exporting');
+      const dataUrl=await window.htmlToImage.toPng(root,{pixelRatio,backgroundColor:'#ffffff',skipAutoScale:true,cacheBust:false});
+      const today=new Date();
+      const day=`${today.getFullYear()}${pad(today.getMonth()+1)}${pad(today.getDate())}`;
+      const a=document.createElement('a');
+      a.download=`contact-sheet-${isSingle?'box-'+pad(idxOf(activeBoxId)+1)+'-':''}${day}.png`;
+      a.href=dataUrl;document.body.append(a);a.click();a.remove();
+      setStatus(`PNGを保存しました（${targetWidth.toLocaleString()} × ${targetHeight.toLocaleString()}px）`,'success');
+    }catch(err){
+      console.error(err);
+      setStatus(err.message || 'PNG出力に失敗しました。','error');
+      alert(err.message || 'PNG出力に失敗しました。');
+    }finally{
+      document.body.classList.remove('exporting');isSaving=false;buttonSheet.disabled=false;buttonBox.disabled=false;
     }
   }
-  function reset() {
-    state.boxes.forEach(revokeBox);
-    state.boxes = [newBox()];
-    state.selectedId = state.boxes[0].id;
-    state.columns = 1;
-    state.modelNames = [];
-    els.columns.value = '1';
-    render();
-  }
-  const demoAsset = (url,name) => ({url,name,file:null});
-  function demo() {
-    reset();
-    const a = state.boxes[0];
-    state.modelNames = ['イラスト生成モデル A', 'イラスト生成モデル B'];
-    a.modelName = 'イラスト生成モデル A';
-    a.modelParameter = '0.5';
-    a.fidelity = '0.85';
-    a.lineWeight = '0.2';
-    a.taper = '-0.3';
-    a.reference = demoAsset('./samples/reference-sunset.svg','reference-sunset.svg');
-    a.results = [demoAsset('./samples/output-portrait.svg','output-portrait.svg')];
-    a.referenceName = '色味と構図の参考';
-    a.prompt = '夕暮れの屋上、柔らかい逆光、人物の上半身';
-    a.memo = '参考画像と生成結果を大きく表示するサンプル。';
-    const b = newBox();
-    b.modelName = 'イラスト生成モデル B';
-    b.modelParameter = '0.7';
-    b.fidelity = '0.65';
-    b.lineWeight = '-0.1';
-    b.taper = '0.5';
-    b.reference = demoAsset('./samples/reference-mecha.svg','reference-mecha.svg');
-    b.results = [demoAsset('./samples/output-mecha.svg','output-mecha.svg')];
-    b.memo = 'メカデザイン比較。';
-    state.boxes.push(b);
-    render(); announce('サンプルを読み込みました');
-  }
-  $('addBoxBtn').addEventListener('click', () => {
-    const b = newBox();
-    state.boxes.push(b); state.selectedId = b.id;
-    render(); announce('ボックスを追加しました');
-  });
-  $('resetBtn').addEventListener('click', () => {
-    if (!confirm('画像や入力内容は保存されません。最初から作り直しますか？')) return;
-    reset(); announce('新規シートを作成しました');
-  });
-  $('loadDemoBtn').addEventListener('click', () => {
-    if (!confirm('現在の入力内容を消してサンプルを読み込みますか？')) return;
-    demo();
-  });
-  els.columns.addEventListener('change',e => {
-    state.columns = Number(e.target.value); renderSheet();
-  });
-  els.exportBtn.addEventListener('click', () => exportPng(els.sheet,'contact-sheet.png','シート'));
-  els.boxBtn.addEventListener('click', () => {
-    const b = selected(); if (!b) return;
-    const el = document.getElementById(`box-${b.id}`);
-    if (el) exportPng(el,`box-${pad(state.boxes.indexOf(b)+1)}.png`,'ボックス');
-  });
-  reset();
+  $('downloadSheet').addEventListener('click',()=>exportPng(false));
+  $('downloadBox').addEventListener('click',()=>exportPng(true));
+
+  renderAll();
+  // 動作確認用。通常利用時には不要。
+  window.__CONTACT_SHEET_DEBUG__={count:()=>boxes.length,select:()=>selected(),images:()=>selected().images};
 })();
