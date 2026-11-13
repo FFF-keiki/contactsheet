@@ -9,3 +9,11 @@
 .media-section { min-width: 0; }
 .media-panel.three-panel { width: 100%; height: auto; aspect-ratio: var(--panel-aspect, 16 / 9); }
 .media-gallery { min-height: 0; }
+
+/* v12: local automatic draft saving; never included in PNG captureSurface */
+.draft-strip{display:flex;flex-wrap:wrap;gap:5px;align-items:center;font-size:10px;color:#6d8098;min-height:23px}
+.draft-strip span{flex:1;min-width:100px;overflow-wrap:anywhere}
+.draft-strip button{background:#fff;border:1px solid #dae1ec;color:#71829b;padding:5px 7px;border-radius:5px;font-size:10px}
+.draft-strip button:last-child{color:#b96c60;border-color:#f0d3ce}
+.draft-strip button:hover{background:#f7f9fc}
+.draft-strip .warning{color:#b45143}

@@ -13,7 +13,7 @@
       <div class="sidebar-heading">
         <div class="eyebrow">FRAME / MAKER</div>
         <h1>コンタクトシート作成</h1>
-        <p>画像は端末内で処理され、サーバーに送信されません。</p>
+        <p>画像は端末内で処理され、サーバーに送信されません。<br>入力内容と画像をこのブラウザへ自動保存します。</p>
       </div>
 
       <div class="sidebar-scroll" id="sidebarScroll">
@@ -32,7 +32,7 @@
             <input type="text" id="modelNameInput" placeholder="例：Line Art Model v3" maxlength="80" aria-label="モデル名を追加">
             <button type="button" class="btn btn-outline btn-small" id="addModel">追加</button>
           </div>
-          <div class="hint">登録したモデル名を各ボックスで選択できます。ページを閉じると消えます。</div>
+          <div class="hint">登録したモデル名も自動保存されます。</div>
         </section>
 
         <div id="boxEditor"></div>
@@ -41,6 +41,11 @@
       <div class="sidebar-bottom">
         <button type="button" class="btn btn-primary" id="downloadSheet">シート全体をPNG保存 <span aria-hidden="true">↗</span></button>
         <button type="button" class="btn btn-secondary" id="downloadBox">選択ボックスをPNG保存</button>
+        <div class="draft-strip">
+          <span id="draftStatus" role="status" aria-live="polite">保存データを確認中…</span>
+          <button type="button" id="persistStorage" title="ブラウザに保存領域の保護を申請">保存を保護</button>
+          <button type="button" id="resetDraft" title="画像を含む作業データを削除">作業を消去</button>
+        </div>
         <p id="status" class="status" role="status" aria-live="polite">画像は縮小・圧縮せずに読み込みます。</p>
       </div>
     </aside>
@@ -61,6 +66,8 @@
     </main>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/dist/html-to-image.min.js" defer></script>
+  <script src="./png-tile-export.js" defer></script>
+  <script src="./draft-store.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
 </html>
