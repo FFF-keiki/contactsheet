@@ -16,7 +16,7 @@
 
   function makeBox() {
     return {
-      id: uid(), modelName:'', modelParameter:'0.1', fidelity:'0.5', lineWidth:'0', taper:'0',
+      id: uid(), modelName:'', modelParameter:'', fidelity:'', lineWidth:'', taper:'',
       prompt:'', memo:'', images:{result:[], ideal:[], reference:[]},
     };
   }
@@ -46,7 +46,7 @@
       const photoCount = Object.values(b.images).reduce((n,a) => n + a.length,0);
       return `<div class="box-item ${b.id === activeBoxId ? 'active':''}" data-select-id="${b.id}">
         <div class="box-num">${pad(i+1)}</div>
-        <div><div class="box-title">ボックス ${pad(i+1)}</div><div class="box-sub">画像 ${photoCount}枚 ／ ${escapeHtml(b.modelName || 'モデル未指定')}</div></div>
+        <div><div class="box-title">ボックス ${pad(i+1)}</div><div class="box-sub">理想・素材・結果 各1枚 ／ ${escapeHtml(b.modelName || 'モデル未指定')}</div></div>
         <div class="box-commands">
           <button class="icon-btn" title="上へ" aria-label="ボックス${i+1}を上へ" data-action="up" data-id="${b.id}" ${i===0?'disabled':''}>↑</button>
           <button class="icon-btn" title="下へ" aria-label="ボックス${i+1}を下へ" data-action="down" data-id="${b.id}" ${i===boxes.length-1?'disabled':''}>↓</button>
@@ -58,11 +58,11 @@
   function renderImageEditor(kind, box) {
     const images = box.images[kind.key];
     return `<div class="upload-block">
-      <div class="upload-block-title">${kind.label} <span>${kind.jp}・${images.length}枚</span></div>
+      <div class="upload-block-title">${kind.label} <span>${kind.jp}・${images.length} / 1枚</span></div>
       <label class="dropzone" data-drop-kind="${kind.key}" for="file-${kind.key}">
-        <strong>＋</strong>クリックまたはドラッグ＆ドロップで追加<br>複数枚を選択可能
+        <strong>＋</strong>クリックまたはドラッグ＆ドロップで追加<br>1枚のみ登録（追加時は置き換え）
       </label>
-      <input id="file-${kind.key}" type="file" data-file-kind="${kind.key}" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+      <input id="file-${kind.key}" type="file" data-file-kind="${kind.key}" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
       <div class="file-list">${images.map((img,i)=>`<div class="file-row">
         <img src="${img.data}" alt=""><div class="file-info"><div class="file-name" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</div><div class="file-meta">${img.width} × ${img.height}px</div></div>
         <button type="button" class="file-delete" title="この画像を削除" aria-label="${escapeHtml(img.name)}を削除" data-remove-file="${kind.key}" data-index="${i}">削除</button>
@@ -79,12 +79,12 @@
         <button type="button" class="btn btn-ghost btn-small" id="deleteModel" ${!box.modelName?'disabled':''} title="選択中のモデル名を一覧から削除">削除</button>
       </div></div>
       <div class="field-row">
-        <div class="field"><label for="modelParameter">モデルパラメーター</label><select id="modelParameter" data-field="modelParameter">${options(.1,1,.1,box.modelParameter)}</select></div>
-        <div class="field"><label for="fidelity">入力画像への忠実度</label><select id="fidelity" data-field="fidelity">${options(.05,1,.05,box.fidelity)}</select></div>
+        <div class="field"><label for="modelParameter">モデルパラメーター</label><select id="modelParameter" data-field="modelParameter">${options(.1,1,.1,box.modelParameter,true)}</select></div>
+        <div class="field"><label for="fidelity">入力画像への忠実度</label><select id="fidelity" data-field="fidelity">${options(.05,1,.05,box.fidelity,true)}</select></div>
       </div>
       <div class="field-row">
-        <div class="field"><label for="lineWidth">線の太さ</label><select id="lineWidth" data-field="lineWidth">${options(-1,1,.1,box.lineWidth)}</select></div>
-        <div class="field"><label for="taper">入り抜き</label><select id="taper" data-field="taper">${options(-1,1,.1,box.taper)}</select></div>
+        <div class="field"><label for="lineWidth">線の太さ</label><select id="lineWidth" data-field="lineWidth">${options(-1,1,.1,box.lineWidth,true)}</select></div>
+        <div class="field"><label for="taper">入り抜き</label><select id="taper" data-field="taper">${options(-1,1,.1,box.taper,true)}</select></div>
       </div>
     </section>
     <section class="editor-section"><h3 class="editor-heading">画像の登録</h3>
@@ -97,8 +97,8 @@
   }
   function imagesHtml(images) {
     if(!images.length) return '<div class="media-placeholder"><strong>＋</strong>画像未登録</div>';
-    const cols = images.length===1 ? 1 : images.length<=4 ? 2 : 3;
-    return `<div class="media-gallery ${images.length > 1 ? 'has-many':''}" style="--gallery-cols:${cols}">${images.map(img=>`<img src="${img.data}" alt="${escapeHtml(img.name)}" data-natural-w="${img.width}" data-natural-h="${img.height}">`).join('')}</div>`;
+    const img = images[0];
+    return `<div class="media-gallery" style="--gallery-cols:1"><img src="${img.data}" alt="${escapeHtml(img.name)}" data-natural-w="${img.width}" data-natural-h="${img.height}"></div>`;
   }
   function previewSection(box, kind){
     return `<section class="media-section" aria-label="${kind.label}">
@@ -106,17 +106,30 @@
       <div class="media-panel three-panel">${imagesHtml(box.images[kind.key])}</div>
     </section>`;
   }
+  // 各列1枚表示。画像の縦横比に合わせて、3列で共通の枠の比率を求める。
+  function imagePanelHeightRatio(images) {
+    if (!images.length) return 0;
+    const img = images[0];
+    return img.width > 0 && img.height > 0 ? img.height / img.width : 9 / 16;
+  }
+  function panelAspectForBox(box) {
+    const ratios = KINDS.map(kind => imagePanelHeightRatio(box.images[kind.key]));
+    const hasImages = ratios.some(r => r > 0);
+    const heightPerWidth = hasImages ? Math.max(...ratios) : 9 / 16;
+    // 極端な数値でもCSSを破綻させない。値は画像の実寸比を維持。
+    return (1 / Math.max(heightPerWidth, 0.01)).toFixed(6);
+  }
   function meta(label, value, wide = false) {
     const v = String(value ?? '').trim();
     return v ? `<div class="metadata-line ${wide?'wide':''}"><b>${escapeHtml(label)}</b><span>${escapeHtml(v)}</span></div>` : '';
   }
   function renderPreview(){
     $('captureSurface').innerHTML = boxes.map((box,i)=>{
-      const modelInfo = [box.modelName,`モデルパラメーター ${box.modelParameter}`,`忠実度 ${box.fidelity}`,`線の太さ ${box.lineWidth}`,`入り抜き ${box.taper}`].filter(Boolean).join(' ／ ');
+      const modelInfo = [box.modelName, box.modelParameter ? `モデルパラメーター ${box.modelParameter}` : '', box.fidelity ? `忠実度 ${box.fidelity}` : '', box.lineWidth ? `線の太さ ${box.lineWidth}` : '', box.taper ? `入り抜き ${box.taper}` : ''].filter(Boolean).join(' ／ ');
       const metadata = meta('CUSTOM MODEL',modelInfo,true)+meta('PROMPT',box.prompt,true)+meta('MEMO',box.memo,true);
       return `<article class="sheet-card ${box.id===activeBoxId?'selected':''}" data-preview-id="${box.id}" aria-label="ボックス ${i+1}">
         <div class="output-layout">
-          <div class="comparison-grid">
+          <div class="comparison-grid" style="--panel-aspect:${panelAspectForBox(box)}">
             ${KINDS.map(kind => previewSection(box, kind)).join('')}
           </div>
         </div>
@@ -225,14 +238,17 @@
   }
   async function addFiles(box,kind,files){
     if(!files.length)return;
-    setStatus(`${files.length}枚の画像を読み込み中…`);
-    let success=0;
-    for(const file of files){
-      try{box.images[kind].push(await readFile(file));success++;}
-      catch(err){setStatus(err.message,'error');}
+    const file = files[0];
+    const kindName = kind === 'ideal' ? '理想' : kind === 'reference' ? '素材' : '結果';
+    setStatus(`${kindName}画像を読み込み中…`);
+    try{
+      box.images[kind] = [await readFile(file)];
+      renderAll();
+      const suffix = files.length > 1 ? '（先頭1枚のみ登録）' : '';
+      setStatus(`${kindName}画像を1枚登録しました。元画像は加工していません。${suffix}`,'success');
+    }catch(err){
+      setStatus(err.message,'error');
     }
-    renderAll();
-    if(success===files.length)setStatus(`${success}枚追加しました。元画像は加工していません。`,'success');
   }
 
   // 画像をトリミングせず contain で表示する領域の実寸から、
